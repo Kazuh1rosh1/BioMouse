@@ -25,24 +25,24 @@ graph TD
         BAT --> L298N_PWR["L298N Motor Power"]
     end
 
-    subgraph ESP32_Node ["ESP32-CAM (Telemetry & Vision Host)"]
+    subgraph ESP32_Node ["ESP32-CAM (Telemetry and Vision Host)"]
         CAM["OV3660 Camera"] --> ESP["ESP32-CAM"]
-        ESP <-->|Wi-Fi AP: bio-mouse<br/>192.168.4.1:80| UI["Mobile Web Cockpit"]
+        ESP <-->|"Wi-Fi AP: bio-mouse (192.168.4.1:80)"| UI["Mobile Web Cockpit"]
     end
 
     subgraph Arduino_Node ["Arduino Uno R3 (Real-Time Control)"]
         UNO["ATmega328P"]
-        AMG["AMG8833 8x8 Thermal Array"] -->|I2C: A4, A5| UNO
-        SONAR["HC-SR04 Ultrasonic"] -->|D12, D13| UNO
-        SW["Entrapment Microswitch"] -->|D2 INPUT_PULLUP| UNO
-        BUZ["Alert Buzzer"] <--|D4| UNO
-        L298N["L298N H-Bridge"] <--|D5 - D10| UNO
+        AMG["AMG8833 8x8 Thermal Array"] -->|"I2C: A4, A5"| UNO
+        SONAR["HC-SR04 Ultrasonic"] -->|"D12, D13"| UNO
+        SW["Entrapment Microswitch"] -->|"D2 INPUT_PULLUP"| UNO
+        UNO -->|"D4"| BUZ["Alert Buzzer"]
+        UNO -->|"D5 to D10"| L298N["L298N H-Bridge"]
     end
 
-    BUCK -->|5V & GND| ESP
-    BUCK -->|5V & GND| UNO
-    UNO -->|D1 TX -> Voltage Divider -> U0R<br/>JSON Telemetry @ 115200| ESP
-    ESP -->|U0T -> Direct -> D0 RX<br/>Control Commands @ 115200| UNO
+    BUCK -->|"5V and GND"| ESP
+    BUCK -->|"5V and GND"| UNO
+    UNO -->|"D1 TX via Divider to U0R (JSON @ 115200)"| ESP
+    ESP -->|"U0T Direct to D0 RX (Cmds @ 115200)"| UNO
 ```
 
 ---
