@@ -1,12 +1,12 @@
 # Bio-Mouse: Dual-MCU Thermal Search-and-Rescue Robot
 
-**Bio-Mouse** is an embedded search-and-rescue rover designed for navigating confined, low-visibility environments. It pairs an **AI-Thinker ESP32-CAM (OV3660)** with an **Arduino Uno R3** over a high-speed hardware UART bridge, combining real-time optical video, an **8×8 infrared thermal array (AMG8833)**, ultrasonic proximity guarding, and physical anti-entrapment fail-safes inside a single-port mobile web cockpit.
+**Bio-Mouse** is an embedded search-and-rescue rover designed for navigating confined, low-visibility environments. It pairs an **AI-Thinker ESP32-CAM (OV3660)** with an **Arduino Uno R3** over a high-speed hardware UART bridge, combining real-time optical video, an **8×8 infrared thermal array (AMG8833)**, ultrasonic proximity guarding, and physical anti-entrapment fail-safes inside a unified mobile web cockpit.
 
 ---
 
 ## Key Features
 
-* **Single-Port Non-Blocking Web Cockpit (`Port 80`):** Serves live OV3660 camera frames (`/capture`), 8×8 thermal heatmaps (`/telemetry`), and low-latency D-pad motor controls (`/cmd`) simultaneously on `http://192.168.4.1` without socket lockups on browser refresh.
+* **Asynchronous Web Architecture (`Port 80` & `Port 81`):** Eliminates ESP32 single-thread HTTP blocking by isolating the continuous MJPEG camera stream (`/stream` on **Port 81** or non-blocking `/capture` snapshots on **Port 80**) from low-latency D-pad motor commands (`/cmd`) and 8×8 thermal telemetry polling (`/telemetry` on **Port 80**).
 * **Dual Operating Modes:**
   * **Manual Mode (`M`):** Responsive touch/mouse D-pad with an automatic $12\text{ cm}$ front obstacle stop guard and manual horn alert.
   * **Autonomous Heat-Seeking Mode (`A`):** Scans 64 thermal pixels in real time, locking onto human heat signatures ($\ge 30.5\,^{\circ}\text{C}$) and steering proportionally across three spatial column zones while maintaining a $15\text{ cm}$ obstacle buffer.
@@ -25,9 +25,10 @@ graph TD
         BAT --> L298N_PWR["L298N Motor Power"]
     end
 
-    subgraph ESP32_Node ["ESP32-CAM (Telemetry and Vision Host)"]
+    subgraph ESP32_Node ["ESP32-CAM (Dual-Server Vision and Telemetry Host)"]
         CAM["OV3660 Camera"] --> ESP["ESP32-CAM"]
-        ESP <-->|"Wi-Fi AP: bio-mouse (192.168.4.1:80)"| UI["Mobile Web Cockpit"]
+        ESP <-->|"Port 80: UI, Cmds and Telemetry"| UI["Mobile Web Cockpit (192.168.4.1)"]
+        ESP -->|"Port 81: Dedicated MJPEG /stream"| UI
     end
 
     subgraph Arduino_Node ["Arduino Uno R3 (Real-Time Control)"]
@@ -104,6 +105,25 @@ graph TD
 | **Bumper Reflex** | $t = 0\text{ ms}$ (`LOW` on `D2`) | Immediately stops, sounds buzzer, and reverses (`R`) for $400\text{ ms}$ |
 | **Entrapment SOS** | Held $\ge 3000\text{ ms}$ | Locks motors in Stop (`S`), pulses buzzer, and broadcasts `{"status":"ROBOT_TRAPPED"}` |
 | **Watchdog Timeout** | $2000\text{ ms}$ | Cuts motor power if no command or heartbeat arrives within $2.0\text{ seconds}$ |
+
+---
+
+## Repository Structure
+
+```text
+bio-mouse-rescue-robot/
+├── README.md                          # System documentation & wiring diagrams
+├── .gitignore                         # Ignores PlatformIO .pio/ build artifacts
+├── firmware/
+│   ├── esp32cam_cockpit/              # ESP32-CAM PlatformIO Project
+│   │   ├── platformio.ini             # PSRAM + huge_app.csv partition config
+│   │   └── src/
+│   │       └── main.cpp               # Web Cockpit UI + HTTP Server + UART0 bridge
+│   └── arduino_uno_controller/        # Arduino Uno R3 Project
+│       ├── platformio.ini             # PlatformIO config for Uno
+│       └── src/
+│           └── main.cpp               # Motor driver, AMG8833, HC-SR04 & failsafes
+```
 
 ---
 
