@@ -1,18 +1,24 @@
 # Bio-Mouse: Dual-MCU Thermal Search-and-Rescue Robot
 
-**Bio-Mouse** is an embedded search-and-rescue rover designed for navigating confined, low-visibility environments. It pairs an **AI-Thinker ESP32-CAM (OV3660)** with an **Arduino Uno R3** over a high-speed hardware UART bridge, combining real-time optical video, an **8×8 infrared thermal array (AMG8833)**, ultrasonic proximity guarding, and physical anti-entrapment fail-safes inside a unified mobile web cockpit.
+![PlatformIO](https://img.shields.io/badge/PlatformIO-Embedded-orange?logo=platformio)
+![ESP32-CAM](https://img.shields.io/badge/Vision%20MCU-ESP32--CAM%20(OV3660)-red?logo=espressif)
+![Arduino Uno](https://img.shields.io/badge/Control%20MCU-Arduino%20Uno%20R3-00979D?logo=arduino)
+![Thermal Sensor](https://img.shields.io/badge/Sensor-AMG8833%208x8%20IR-F4BB44)
+![License](https://img.shields.io/badge/License-MIT-brightgreen)
+
+**Bio-Mouse** is an embedded search-and-rescue rover engineered for navigating confined, low-visibility collapse environments. It pairs an **AI-Thinker ESP32-CAM (OV3660)** with an **Arduino Uno R3** over a high-speed hardware UART bridge, combining real-time optical video, an **8×8 infrared thermal array (AMG8833)**, ultrasonic proximity guarding, and physical anti-entrapment fail-safes inside a unified mobile web cockpit.
 
 ---
 
 ## Key Features
 
-* **Asynchronous Web Architecture (`Port 80` & `Port 81`):** Eliminates ESP32 single-thread HTTP blocking by isolating the continuous MJPEG camera stream (`/stream` on **Port 81** or non-blocking `/capture` snapshots on **Port 80**) from low-latency D-pad motor commands (`/cmd`) and 8×8 thermal telemetry polling (`/telemetry` on **Port 80**).
+* **Non-Blocking Asynchronous Web Cockpit (`Port 80`):** Eliminates ESP32 single-thread HTTP socket lockups by serving individual low-latency JPEG frames (`/capture`), real-time 8×8 thermal heatmaps (`/telemetry`), and D-pad motor commands (`/cmd`) over a single port (`http://192.168.4.1`) with automatic LRU socket purging (`lru_purge_enable`).
 * **Dual Operating Modes:**
   * **Manual Mode (`M`):** Responsive touch/mouse D-pad with an automatic $12\text{ cm}$ front obstacle stop guard and manual horn alert.
-  * **Autonomous Heat-Seeking Mode (`A`):** Scans 64 thermal pixels in real time, locking onto human heat signatures ($\ge 30.5\,^{\circ}\text{C}$) and steering proportionally across three spatial column zones while maintaining a $15\text{ cm}$ obstacle buffer.
+  * **Autonomous Heat-Seeking Mode (`A`):** Scans 64 thermal pixels in real time, locking onto human heat signatures ($\ge 30.5\,^{\circ}\text{C}$) and steering across three spatial column zones while maintaining a $15\text{ cm}$ obstacle buffer.
 * **Multi-Layered Safety Fail-Safes:**
   * **Communication Watchdog ($2.0\text{ s}$):** Automatically cuts motor power if the Wi-Fi client disconnects or UART heartbeats drop for more than 2 seconds.
-  * **Anti-Entrapment Microswitch Override:** Detects physical bumper collisions, executes an immediate $400\text{ ms}$ reverse maneuver, and triggers an SOS audio alarm plus a live `ROBOT_TRAPPED` dashboard alert if pinned for $> 3\text{ seconds}$.
+  * **Anti-Entrapment Microswitch Override:** Detects physical bumper collisions, executes an immediate $400\text{ ms}$ reverse maneuver, and triggers an SOS audio alarm plus a live `ROBOT_TRAPPED` dashboard alert if pinned for more than 3 seconds.
 
 ---
 
@@ -25,10 +31,9 @@ graph TD
         BAT --> L298N_PWR["L298N Motor Power"]
     end
 
-    subgraph ESP32_Node ["ESP32-CAM (Dual-Server Vision and Telemetry Host)"]
+    subgraph ESP32_Node ["ESP32-CAM (Vision and Telemetry Host)"]
         CAM["OV3660 Camera"] --> ESP["ESP32-CAM"]
-        ESP <-->|"Port 80: UI, Cmds and Telemetry"| UI["Mobile Web Cockpit (192.168.4.1)"]
-        ESP -->|"Port 81: Dedicated MJPEG /stream"| UI
+        ESP <-->|"Wi-Fi AP: bio-mouse (192.168.4.1:80)"| UI["Mobile Web Cockpit"]
     end
 
     subgraph Arduino_Node ["Arduino Uno R3 (Real-Time Control)"]
@@ -94,11 +99,43 @@ graph TD
 
 ---
 
+## Inter-MCU Communication Protocol (`115200 8N1`)
+
+### 1. Downlink: ESP32-CAM (`U0T`) $\rightarrow$ Arduino Uno (`D0/RX`)
+Commands are transmitted as single ASCII characters via `GET /cmd?val=<CHAR>` requests plus an $800\text{ ms}$ watchdog heartbeat:
+
+| Byte | Action / Mode | Description |
+| :---: | :--- | :--- |
+| **`M`** | Manual Mode | Switches control to the web D-pad; enables $12\text{ cm}$ front proximity stop |
+| **`A`** | Autonomous Mode | Engages AMG8833 heat-seeking tracker ($\ge 30.5\,^{\circ}\text{C}$) & $15\text{ cm}$ guard |
+| **`L`** | Drive Forward | Activates both motor channels forward (`IN1=HIGH, IN2=LOW, IN3=HIGH, IN4=LOW`) |
+| **`R`** | Drive Backward | Reverses both motor channels (`IN1=LOW, IN2=HIGH, IN3=LOW, IN4=HIGH`) |
+| **`F`** | Tank Turn Left | Left channel reverse, Right channel forward |
+| **`B`** | Tank Turn Right | Left channel forward, Right channel reverse |
+| **`S`** | Stop / Halt | Pulls all motor direction pins `LOW` |
+| **`Z`** | Horn Alert | Pulses the `D4` piezo buzzer for $100\text{ ms}$ and resets command state to `S` |
+
+### 2. Uplink: Arduino Uno (`D1/TX`) $\rightarrow$ ESP32-CAM (`U0R`)
+The Arduino streams newline-delimited JSON payloads every $200\text{ ms}$:
+
+* **Standard Telemetry Payload:**
+  ```json
+  {"d":42,"p":[26.5,26.8,27.0,...,32.4]}
+  ```
+  * `d`: Ultrasonic front distance in centimeters (`0–200`).
+  * `p`: 64-element float array representing the $8\times8$ AMG8833 thermal grid in $^{\circ}\text{C}$.
+* **Entrapment Emergency Payload (Triggered when `D2` is held `LOW` for $> 3000\text{ ms}$):**
+  ```json
+  {"status":"ROBOT_TRAPPED"}
+  ```
+
+---
+
 ## Autonomous & Safety Parameters
 
 | Parameter | Threshold | Behavior |
 | :--- | :--- | :--- |
-| **Thermal Target Lock** | $\ge 30.5\,^{\circ}\text{C}$ | Ignores ambient backgrounds $< 30.5\,^{\circ}\text{C}$; tracks warmest pixel column |
+| **Thermal Target Lock** | $\ge 30.5\,^{\circ}\text{C}$ | Ignores ambient backgrounds below $30.5\,^{\circ}\text{C}$; tracks warmest pixel column |
 | **Steering Zones (8×8 Grid)** | Cols `0–2` / `3–4` / `5–7` | Cols `0–2`: Steer Left (`F`) \| Cols `3–4`: Forward (`L`) \| Cols `5–7`: Steer Right (`B`) |
 | **Auto Obstacle Stop** | $\le 15\text{ cm}$ | Halts autonomous forward tracking if an obstacle is within $15\text{ cm}$ |
 | **Manual Obstacle Guard** | $\le 12\text{ cm}$ | Blocks manual forward movement (`L`) and sounds a $50\text{ ms}$ warning beep |
@@ -112,7 +149,7 @@ graph TD
 
 ```text
 bio-mouse-rescue-robot/
-├── README.md                          # System documentation & wiring diagrams
+├── README.md                          # System documentation, protocol & diagrams
 ├── .gitignore                         # Ignores PlatformIO .pio/ build artifacts
 ├── firmware/
 │   ├── esp32cam_cockpit/              # ESP32-CAM PlatformIO Project
@@ -139,7 +176,26 @@ bio-mouse-rescue-robot/
    * Connect `IO0` to `GND` on the ESP32-CAM and upload the firmware.
    * Disconnect `IO0` from `GND` after upload completes.
 4. **Reconnect & Boot:**
-   * Power both boards from the regulated $5\text{V}$ supply.
+   * Power both boards from the regulated $5\text{V}$ supply (do not rely on FTDI USB power for Wi-Fi AP startup).
    * Reconnect the `U0R`/`U0T` UART bridge wires.
    * Listen for **1 short beep** from the Arduino (confirming AMG8833 I2C initialization; 3 beeps indicates an I2C wiring error).
    * Connect a phone or laptop to the **`bio-mouse`** Wi-Fi network (Password: `12345678`) and navigate to **`http://192.168.4.1`**.
+
+---
+
+## Hardware Troubleshooting & Field Notes
+
+* **Why UART0 (`U0R`/`U0T`) is Used Instead of Secondary Pins:** On the AI-Thinker ESP32-CAM, secondary GPIO pins (`12`, `14`, `15`) are shared with strapping/SD-card lines and can conflict with the camera's high-frequency I2S DMA transfers. Using hardware `UART0` with `-DCORE_DEBUG_LEVEL=0` guarantees zero-conflict full-duplex serial communication while streaming video.
+* **Single-Port `/capture` vs. Infinite `/stream`:** Standard ESP32 MJPEG streaming loops occupy the single HTTP server thread indefinitely, blocking incoming `/cmd` requests and hanging on browser refresh. Polling `/capture` with `CAMERA_GRAB_LATEST` and `config.lru_purge_enable = true` keeps Port 80 non-blocking and resilient across page reloads.
+* **Boot Beep Codes:**
+  * **1 Short Beep:** AMG8833 thermal sensor detected at I2C address `0x69` (or `0x68`); system ready.
+  * **3 Rapid Beeps:** AMG8833 I2C initialization failed; check `A4 (SDA)` and `A5 (SCL)` jumper continuity.
+
+---
+
+## Future Roadmap
+
+- [ ] **Bicubic Thermal Interpolation & Target Crosshair:** Upscale the $8\times8$ AMG8833 array in the browser canvas to a smooth $64\times64$ FLIR-style heatmap with automatic peak-temperature crosshair lock.
+- [ ] **Thermal-Over-Video HUD Fusion:** Alpha-blend the thermal canvas directly over the live OV3660 camera viewport for unified spatial awareness.
+- [ ] **PWM Torque Selector & Headlight Control:** Add web UI controls for 3-speed PWM motor gearing and remote toggling of the ESP32-CAM onboard LED (`GPIO 4`).
+- [ ] **Black-Box MicroSD Incident Logger:** Automatically save timestamped JPEG frames and thermal CSV matrices to an onboard MicroSD card whenever a thermal signature $\ge 31.0\,^{\circ}\text{C}$ is detected.
