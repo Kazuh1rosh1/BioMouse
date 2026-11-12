@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>BIO-MOUSE Cockpit (Interactive Simulator)</title>
+  <style>
+    :root {
+      --primary: #A51C30;
+      --bg-dark: #1B1212;
+      --card-bg: #261B1B;
+      --accent: #F4BB44;
+      --text: #FAFAFA;
+      --text-muted: #9E9494;
+      --danger: #e53935;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body { background: var(--bg-dark); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+    header { width: 100%; max-width: 440px; display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: var(--card-bg); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); margin-bottom: 10px; }
+    .brand { font-weight: 700; letter-spacing: 1px; color: var(--accent); font-size: 1rem; }
+    .badge { font-size: 0.7rem; padding: 3px 8px; border-radius: 20px; font-weight: 600; display: flex; align-items: center; gap: 5px; color: #81c784; background: rgba(76, 175, 80, 0.15); cursor: pointer; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .alert-banner { display: none; width: 100%; max-width: 440px; background: var(--danger); color: #fff; font-weight: 700; text-align: center; padding: 10px; border-radius: 10px; margin-bottom: 10px; font-size: 0.85rem; }
+    .mode-card, .video-card, .thermal-card, .telemetry-row { width: 100%; max-width: 440px; background: var(--card-bg); border-radius: 12px; padding: 10px; border: 1px solid rgba(255,255,255,0.06); margin-bottom: 10px; display: flex; flex-direction: column; align-items: center; }
+    .mode-card { flex-direction: row; justify-content: space-between; padding: 10px 14px; }
+    select { background: var(--bg-dark); color: var(--text); border: 1px solid var(--accent); padding: 6px 10px; border-radius: 8px; font-weight: 600; font-size: 0.8rem; }
+    .video-sim { width: 100%; height: 200px; border-radius: 8px; background: radial-gradient(circle at center, #2b1d1d 0%, #0d0909 100%); border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; justify-content: center; align-items: center; color: var(--text-muted); font-size: 0.8rem; position: relative; overflow: hidden; }
+    .hud-crosshair { width: 36px; height: 36px; border: 1px dashed var(--accent); border-radius: 50%; position: absolute; pointer-events: none; }
+    .telemetry-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0; background: transparent; border: none; }
+    .card { background: var(--card-bg); padding: 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; align-items: center; width: 100%; }
+    .card-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 4px; }
+    .card-val { font-size: 1.5rem; font-weight: 700; }
+    .card-val small { font-size: 0.8rem; margin-left: 2px; }
+    canvas { width: 140px; height: 140px; border-radius: 6px; image-rendering: pixelated; background: #000; border: 1px solid rgba(255,255,255,0.1); }
+    .dpad-container { width: 100%; max-width: 440px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 60px); gap: 6px; margin-bottom: 10px; }
+    .btn { background: var(--card-bg); border: 1px solid rgba(255,255,255,0.08); color: var(--text); font-weight: 700; border-radius: 12px; font-size: 1rem; display: flex; justify-content: center; align-items: center; cursor: pointer; }
+    .btn:active { background: var(--primary); transform: scale(0.96); }
+    .btn-forward  { grid-column: 2; grid-row: 1; }
+    .btn-left     { grid-column: 1; grid-row: 2; }
+    .btn-stop     { grid-column: 2; grid-row: 2; background: rgba(229, 57, 53, 0.2); color: var(--danger); }
+    .btn-right    { grid-column: 3; grid-row: 2; }
+    .btn-backward { grid-column: 2; grid-row: 3; }
+    .actions-row { width: 100%; max-width: 440px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .btn-util { padding: 10px; background: var(--card-bg); border: 1px solid rgba(255,255,255,0.08); color: var(--accent); border-radius: 10px; font-weight: 600; font-size: 0.8rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">BIO-MOUSE COCKPIT</div>
+    <div class="badge" onclick="toggleTrap()" title="Click to test Trapped Alert"><div class="dot"></div> SIMULATOR MODE</div>
+  </header>
+
+  <div class="alert-banner" id="trapBanner">⚠️ ROBOT TRAPPED: EXTRACTION REQUIRED</div>
+
+  <div class="mode-card">
+    <span class="card-label" style="margin:0;">Controller Mode</span>
+    <select id="modeSelect" onchange="document.getElementById('dpad').style.opacity = (this.value==='A')?'0.4':'1.0'">
+      <option value="M">Manual D-Pad</option>
+      <option value="A">Auto (Heat-Seeking)</option>
+    </select>
+  </div>
+
+  <div class="video-card">
+    <div class="card-label" style="margin-bottom:6px;">OV3660 Live Feed (320x240 QVGA)</div>
+    <div class="video-sim">
+      <div class="hud-crosshair"></div>
+      <span>[ OV3660 OPTICAL FEED - 15 FPS ]</span>
+      <span id="cmdLog" style="color:var(--accent); font-size:0.75rem; margin-top:6px;">LAST UART CMD: 'S' (STOP)</span>
+    </div>
+  </div>
+
+  <div class="telemetry-row">
+    <div class="card">
+      <div class="card-label">Distance</div>
+      <div class="card-val" id="distVal">38<small>cm</small></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Peak Thermal</div>
+      <div class="card-val" id="tempVal" style="color:var(--accent)">32.6<small>&deg;C</small></div>
+    </div>
+  </div>
+
+  <div class="thermal-card">
+    <div class="card-label" style="margin-bottom:6px;">AMG8833 Thermal Array (8x8)</div>
+    <canvas id="thermalCanvas" width="8" height="8"></canvas>
+  </div>
+
+  <div class="dpad-container" id="dpad">
+    <button class="btn btn-forward"  onclick="logCmd('L (FORWARD)')">&#9650;</button>
+    <button class="btn btn-left"     onclick="logCmd('F (LEFT)')">&#9664;</button>
+    <button class="btn btn-stop"     onclick="logCmd('S (STOP)')">STOP</button>
+    <button class="btn btn-right"    onclick="logCmd('B (RIGHT)')">&#9654;</button>
+    <button class="btn btn-backward" onclick="logCmd('R (REVERSE)')">&#9660;</button>
+  </div>
+
+  <div class="actions-row">
+    <button class="btn btn-util" onclick="logCmd('Z (HORN ALERT)')">HORN ALERT</button>
+    <button class="btn btn-util" onclick="toggleTrap()" style="color:var(--danger)">SIMULATE TRAP</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('thermalCanvas');
+    const ctx = canvas.getContext('2d');
+    let t = 0;
+
+    function logCmd(label) {
+      document.getElementById('cmdLog').innerText = "LAST UART CMD: '" + label + "'";
+    }
+
+    function toggleTrap() {
+      const b = document.getElementById('trapBanner');
+      b.style.display = (b.style.display === 'block') ? 'none' : 'block';
+    }
+
+    setInterval(() => {
+      t += 0.25;
+      const cx = 3.5 + Math.sin(t) * 2.0;
+      const cy = 3.5 + Math.cos(t * 0.7) * 1.5;
+      const pixels = [];
+      let maxTemp = -999;
+
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const dist = Math.hypot(c - cx, r - cy);
+          const temp = Math.max(24.0, 33.2 - dist * 2.4 + (Math.random() * 0.4));
+          pixels.push(temp);
+          if (temp > maxTemp) maxTemp = temp;
+        }
+      }
+
+      const imgData = ctx.createImageData(8, 8);
+      for (let i = 0; i < 64; i++) {
+        const norm = Math.min(Math.max((pixels[i] - 20) / 20.0, 0), 1);
+        const r = Math.floor(Math.min(Math.max(2.0 * norm - 0.5, 0), 1) * 255);
+        const g = Math.floor(Math.min(Math.max(2.0 * (norm - 0.5), 0), 1) * 255);
+        const b = Math.floor(Math.min(Math.max(1.0 - 2.0 * norm, 0), 1) * 255);
+        const idx = i * 4;
+        imgData.data[idx] = r; imgData.data[idx+1] = g; imgData.data[idx+2] = b; imgData.data[idx+3] = 255;
+      }
+      ctx.putImageData(imgData, 0, 0);
+      document.getElementById('tempVal').innerHTML = maxTemp.toFixed(1) + '<small>&deg;C</small>';
+      document.getElementById('distVal').innerHTML = Math.floor(32 + Math.sin(t) * 10) + '<small>cm</small>';
+    }, 350);
+  </script>
+</body>
+</html>
