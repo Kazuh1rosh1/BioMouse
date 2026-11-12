@@ -25,30 +25,59 @@
 ## System Architecture
 
 ```mermaid
-graph TD
-    subgraph Power_Supply ["Power Distribution"]
-        BAT["Battery Pack"] --> BUCK["5V Buck Converter"]
-        BAT --> L298N_PWR["L298N Motor Power"]
+flowchart TD
+    subgraph PowerDistribution
+        BAT[Battery Pack] --> BUCK[5V Buck Converter]
+        BAT --> L298N_PWR[L298N Motor Power]
     end
 
-    subgraph ESP32_Node ["ESP32-CAM (Vision and Telemetry Host)"]
-        CAM["OV3660 Camera"] --> ESP["ESP32-CAM"]
-        ESP <-->|"Wi-Fi AP: bio-mouse (192.168.4.1:80)"| UI["Mobile Web Cockpit"]
+    subgraph ESP32Node
+        CAM[OV3660 Camera] --> ESP[ESP32-CAM]
+        ESP <-->|Wi-Fi AP 192.168.4.1 Port 80| UI[Mobile Web Cockpit]
     end
 
-    subgraph Arduino_Node ["Arduino Uno R3 (Real-Time Control)"]
-        UNO["ATmega328P"]
-        AMG["AMG8833 8x8 Thermal Array"] -->|"I2C: A4, A5"| UNO
-        SONAR["HC-SR04 Ultrasonic"] -->|"D12, D13"| UNO
-        SW["Entrapment Microswitch"] -->|"D2 INPUT_PULLUP"| UNO
-        UNO -->|"D4"| BUZ["Alert Buzzer"]
-        UNO -->|"D5 to D10"| L298N["L298N H-Bridge"]
+    subgraph ArduinoNode
+        UNO[Arduino Uno R3]
+        AMG[AMG8833 8x8 Thermal Sensor] -->|I2C A4 and A5| UNO
+        SONAR[HC-SR04 Ultrasonic] -->|Pins D12 and D13| UNO
+        SW[Entrapment Microswitch] -->|Pin D2 Pullup| UNO
+        UNO -->|Pin D4| BUZ[Alert Buzzer]
+        UNO -->|Pins D5 to D10| L298N[L298N Motor Driver]
     end
 
-    BUCK -->|"5V and GND"| ESP
-    BUCK -->|"5V and GND"| UNO
-    UNO -->|"D1 TX via Divider to U0R (JSON @ 115200)"| ESP
-    ESP -->|"U0T Direct to D0 RX (Cmds @ 115200)"| UNO
+    BUCK -->|5V and GND| ESP
+    BUCK -->|5V and GND| UNO
+    UNO -->|D1 TX via Divider to U0R| ESP
+    ESP -->|U0T Direct to D0 RX| UNO
+```
+
+### Hardware Block Schematic
+
+```text
++-----------------------------------------------------------------------------+
+|                           POWER DISTRIBUTION RAIL                           |
+|  [Battery Pack] -----> [L298N 12V Motor Power]                              |
+|                 -----> [5V Buck Converter] ---> ESP32-CAM 5V & Arduino 5V   |
+|  [Common GND]   -----> Shared across Battery, Buck, L298N, Uno & ESP32-CAM  |
++-----------------------------------------------------------------------------+
+                                       |
+       +-------------------------------+-------------------------------+
+       |                                                               |
+       v                                                               v
++------------------------------+                               +------------------------------+
+|          ESP32-CAM           |                               |        ARDUINO UNO R3        |
+|   (Vision & Web Server AP)   |      UART0 @ 115200 Baud      |  (Real-Time Sensor & Motor)  |
+|                              |                               |                              |
+|  [OV3660 Camera]             |   Cmds ('M','A','L','R'...)   |  [A4/A5] <-- AMG8833 Thermal |
+|  [Wi-Fi AP: bio-mouse]       |  [U0T / IO1] -------------->  |  [D0/RX]                     |
+|  [HTTP Cockpit: 192.168.4.1] |                               |  [D1/TX]                     |
+|                              |   JSON Telemetry (Every 200ms)|     |                        |
+|                  [U0R / IO3] |  <-- [1kΩ] --+-- [1kΩ] -------+-----+                        |
++------------------------------+              |                |  [D2]    <-- Microswitch     |
+                                           [2kΩ]               |  [D4]    --> Piezo Buzzer    |
+                                              |                |  [D12/13]<-> HC-SR04 Sonar   |
+                                            [GND]              |  [D5..10]--> L298N 4WD Motors|
+                                                               +------------------------------+
 ```
 
 ---
@@ -150,21 +179,25 @@ The Arduino streams newline-delimited JSON payloads every $200\text{ ms}$:
 ```text
 bio-mouse-rescue-robot/
 ├── README.md                          # System documentation, protocol & diagrams
+├── LICENSE                            # MIT License (Anonymized)
 ├── .gitignore                         # Ignores PlatformIO .pio/ build artifacts
-├── firmware/
-│   ├── esp32cam_cockpit/              # ESP32-CAM PlatformIO Project
-│   │   ├── platformio.ini             # PSRAM + huge_app.csv partition config
-│   │   └── src/
-│   │       └── main.cpp               # Web Cockpit UI + HTTP Server + UART0 bridge
-│   └── arduino_uno_controller/        # Arduino Uno R3 Project
-│       ├── platformio.ini             # PlatformIO config for Uno
-│       └── src/
-│           └── main.cpp               # Motor driver, AMG8833, HC-SR04 & failsafes
+├── docs/
+│   ├── hardware_pinout.md             # Bench wiring & 5V-to-3.3V divider guide
+│   └── cockpit_preview.html           # Standalone interactive Web Cockpit simulator
+└── firmware/
+    ├── esp32cam_cockpit/              # ESP32-CAM PlatformIO Project
+    │   ├── platformio.ini             # PSRAM + huge_app.csv partition config
+    │   └── src/
+    │       └── main.cpp               # Web Cockpit UI + HTTP Server + UART0 bridge
+    └── arduino_uno_controller/        # Arduino Uno R3 Project
+        ├── platformio.ini             # PlatformIO config & library dependencies
+        └── src/
+            └── main.cpp               # Motor driver, AMG8833, HC-SR04 & failsafes
 ```
 
 ---
 
-## Flashing & Deployment Guide
+## Flashing, Deployment & Bench Verification
 
 1. **Disconnect UART Jumpers Before Flashing:** Unplug the wires connected to `D0`/`D1` on the Arduino and `U0R`/`U0T` on the ESP32-CAM prior to uploading code via USB/FTDI.
 2. **Flash Arduino Uno:**
@@ -175,11 +208,11 @@ bio-mouse-rescue-robot/
    * Open `firmware/esp32cam_cockpit` in PlatformIO.
    * Connect `IO0` to `GND` on the ESP32-CAM and upload the firmware.
    * Disconnect `IO0` from `GND` after upload completes.
-4. **Reconnect & Boot:**
-   * Power both boards from the regulated $5\text{V}$ supply (do not rely on FTDI USB power for Wi-Fi AP startup).
-   * Reconnect the `U0R`/`U0T` UART bridge wires.
-   * Listen for **1 short beep** from the Arduino (confirming AMG8833 I2C initialization; 3 beeps indicates an I2C wiring error).
-   * Connect a phone or laptop to the **`bio-mouse`** Wi-Fi network (Password: `12345678`) and navigate to **`http://192.168.4.1`**.
+4. **Reconnect & Verify on the Bench:**
+   * Power both boards from the regulated $5\text{V}$ supply (do not rely on FTDI USB power for Wi-Fi AP startup) and reconnect the `U0R`/`U0T` UART bridge wires.
+   * **I2C Check:** Listen for **1 short beep** from the Arduino confirming AMG8833 initialization (3 beeps indicates an I2C wiring error on `A4`/`A5`).
+   * **Cockpit Check:** Connect to the **`bio-mouse`** Wi-Fi network (Password: `12345678`) and open **`http://192.168.4.1`**. Verify live video, distance, and thermal grid updates.
+   * **Failsafe Check:** Tap the `D2` microswitch to verify the $400\text{ ms}$ reverse reflex; hold it for $>3\text{ seconds}$ to verify the SOS buzzer and `ROBOT_TRAPPED` web banner.
 
 ---
 
@@ -187,9 +220,6 @@ bio-mouse-rescue-robot/
 
 * **Why UART0 (`U0R`/`U0T`) is Used Instead of Secondary Pins:** On the AI-Thinker ESP32-CAM, secondary GPIO pins (`12`, `14`, `15`) are shared with strapping/SD-card lines and can conflict with the camera's high-frequency I2S DMA transfers. Using hardware `UART0` with `-DCORE_DEBUG_LEVEL=0` guarantees zero-conflict full-duplex serial communication while streaming video.
 * **Single-Port `/capture` vs. Infinite `/stream`:** Standard ESP32 MJPEG streaming loops occupy the single HTTP server thread indefinitely, blocking incoming `/cmd` requests and hanging on browser refresh. Polling `/capture` with `CAMERA_GRAB_LATEST` and `config.lru_purge_enable = true` keeps Port 80 non-blocking and resilient across page reloads.
-* **Boot Beep Codes:**
-  * **1 Short Beep:** AMG8833 thermal sensor detected at I2C address `0x69` (or `0x68`); system ready.
-  * **3 Rapid Beeps:** AMG8833 I2C initialization failed; check `A4 (SDA)` and `A5 (SCL)` jumper continuity.
 
 ---
 
